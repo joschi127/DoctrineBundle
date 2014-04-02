@@ -330,6 +330,8 @@ class DoctrineExtension extends AbstractDoctrineExtension
         }
 
         $container->setAlias('doctrine.orm.entity_manager', sprintf('doctrine.orm.%s_entity_manager', $config['default_entity_manager']));
+		
+        $config['entity_managers'] = $this->collectAutoMappings($config['entity_managers'], $container);
 
         foreach ($config['entity_managers'] as $name => $entityManager) {
             $entityManager['name'] = $name;
@@ -349,6 +351,43 @@ class DoctrineExtension extends AbstractDoctrineExtension
     }
 
     /**
+     * @param array            $entityManagerConfigs An array of entity manager configurations
+     * @param ContainerBuilder $container            A ContainerBuilder instance
+     *
+     * @throws \InvalidArgumentException
+     *
+     * @return array
+     */
+    protected function collectAutoMappings(array $entityManagerConfigs, ContainerBuilder $container)
+    {
+        $definedBundles = array_keys($container->getParameter('kernel.bundles'));
+
+        foreach ($entityManagerConfigs as $name => &$entityManager) {
+            if (isset($entityManager['auto_mapping']) && $entityManager['auto_mapping']) {
+                foreach ($definedBundles as $bundle) {
+                    foreach ($entityManagerConfigs as $name2 => $entityManager2) {
+                        if ($name2 !== $name) {
+                            if (isset($entityManager2['auto_mapping']) && $entityManager2['auto_mapping']) {
+                                throw new \LogicException(sprintf('You cannot enable "auto_mapping" on more than one entity manager at the same time (found in "%s" and %s").', $name, $name2));
+                            }
+
+                            if (isset($entityManager2['mappings'][$bundle])) {
+                                continue 2;
+                            }
+                        }
+                    }
+
+                    $entityManager['mappings'][$bundle]['mapping'] = true;
+                }
+
+                $entityManager['auto_mapping'] = false;
+            }
+        }
+
+        return $entityManagerConfigs;
+    }
+
+    /**
      * Loads a configured ORM entity manager.
      *
      * @param array            $entityManager A configured ORM entity manager.
@@ -356,10 +395,6 @@ class DoctrineExtension extends AbstractDoctrineExtension
      */
     protected function loadOrmEntityManager(array $entityManager, ContainerBuilder $container)
     {
-        if ($entityManager['auto_mapping'] && count($this->entityManagers) > 1) {
-            throw new \LogicException('You cannot enable "auto_mapping" when several entity managers are defined.');
-        }
-
         $ormConfigDef = $container->setDefinition(sprintf('doctrine.orm.%s_configuration', $entityManager['name']), new DefinitionDecorator('doctrine.orm.configuration'));
 
         $this->loadOrmEntityManagerMappingInformation($entityManager, $ormConfigDef, $container);
